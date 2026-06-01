@@ -1,9 +1,7 @@
-async function sendData() {
-  const response = await fetch('/api/tasks', { // 吹き出し：4-Aで決めた内容を差し込む
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title1: "会議", title2: 人間ぶっ殺しゾーン }) // 吹き出し：4-Aで決めた内容を差し込む
-  });
-  const data = await response.json();
-  console.log(data);
+function showTopPage() {
+  // 画面全体を「トップページです」という文字に書き換えます
+  document.body.textContent = "トップページです";
 }
+
+// ページが読み込まれたら実行する
+showTopPage();
