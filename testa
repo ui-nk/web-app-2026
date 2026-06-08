@@ -1,0 +1,60 @@
+import urllib.request
+import json
+import threading
+import time
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import List
+
+app = FastAPI()
+
+# --- 既存のSensorクラス群は継承 ---
+# (ここに前のコードのBaseSensor, PhotoSensorなどを配置)
+
+# --- 状態管理用マネージャー ---
+class SystemState:
+    def __init__(self):
+        self.people_count = 0
+        self.is_someone_present = False
+        self.incomplete_tasks = []
+        self.last_update = ""
+
+state_store = SystemState()
+
+# --- 監視バックグラウンドタスク ---
+def monitoring_loop(system):
+    """メインロジックを別スレッドで永続実行"""
+    while True:
+        system.run_check()
+        # 状態をAPI用に同期
+        state_store.people_count = system.ai_camera.get_people_count()
+        state_store.is_someone_present = system.was_someone_present
+        state_store.incomplete_tasks = [s.task_name for s in system.sensors if not s.is_task_completed()]
+        state_store.last_update = time.strftime("%Y-%m-%d %H:%M:%S")
+        time.sleep(5)
+
+# --- APIエンドポイント ---
+@app.get("/api/status")
+async def get_status():
+    """フロントエンドが現在の状況を取得するためのAPI"""
+    return {
+        "status": "Warning" if not state_store.is_someone_present and state_store.incomplete_tasks else "OK",
+        "people_count": state_store.people_count,
+        "is_someone_present": state_store.is_someone_present,
+        "incomplete_tasks": state_store.incomplete_tasks,
+        "last_update": state_store.last_update
+    }
+
+# --- 起動処理 ---
+@app.on_event("startup")
+def startup_event():
+    # センサー初期化（前回のコードの実行部分）
+    task_sensors = [PhotoSensor("光", "無人時の消灯"), MagneticSensor("窓", "窓の戸締まり")]
+    system = MonitoringSystem(
+        sensors=task_sensors,
+        ai_camera=AICamera("AIカメラ", "人数検知"),
+        pir_sensor=PIRSensor("赤外線", "動体検知")
+    )
+    # 監視ループをスレッドで開始
+    thread = threading.Thread(target=monitoring_loop, args=(system,), daemon=True)
+    thread.start()

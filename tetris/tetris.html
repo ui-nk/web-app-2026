@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>VS Code テトリス（グリッド線付き）</title>
+    <style>
+        body {
+            background-color: #202020;
+            color: white;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        h1 {
+            margin-bottom: 10px;
+        }
+        #game-container {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+            position: relative;
+        }
+        #stage-wrapper {
+            position: relative;
+        }
+        canvas {
+            border: 4px solid #808080;
+            background-color: #111;
+        }
+        #pause-overlay {
+            display: none;
+            position: absolute;
+            top: 4px;
+            left: 4px;
+            width: 300px;
+            height: 600px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            font-size: 30px;
+            font-weight: bold;
+            text-align: center;
+            line-height: 600px;
+            letter-spacing: 4px;
+            pointer-events: none;
+        }
+        #sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            font-size: 20px;
+        }
+        .info-box {
+            background-color: #333;
+            padding: 10px 20px;
+            border-radius: 5px;
+            min-width: 100px;
+        }
+        #game-over-text {
+            color: #ff4d4d;
+            font-weight: bold;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>VS Code TETRIS</h1>
+    
+    <div id="game-container">
+        <div id="stage-wrapper">
+            <canvas id="stage" width="300" height="600"></canvas>
+            <div id="pause-overlay">PAUSE</div>
+        </div>
+        
+        <div id="sidebar">
+            <div class="info-box">
+                <div>SCORE</div>
+                <div id="score">0</div>
+            </div>
+            <div id="game-over-text" class="info-box">GAME OVER</div>
+            <div style="font-size: 14px; color: #aaa; line-height: 1.6;">
+                【操作方法】<br>
+                ← / → : 左右移動<br>
+                ↓ : ソフトドロップ<br>
+                ↑ : 右回転<br>
+                Space : ハードドロップ<br>
+                <strong style="color: #fff; background: #555; padding: 2px 5px; border-radius: 3px;">P</strong> または <strong style="color: #fff; background: #555; padding: 2px 5px; border-radius: 3px;">Esc</strong> : ポーズ
+            </div>
+        </div>
+    </div>
+
+<script>
+    const ROW = 20;
+    const COL = 10;
+    const BLOCK_SIZE = 30;
+
+    const canvas = document.getElementById("stage");
+    const ctx = canvas.getContext("2d");
+    const pauseOverlay = document.getElementById("pause-overlay");
+
+    const SHAPES = [
+        [[1,1,1,1]], // I
+        [[1,1,1],[0,1,0]], // T
+        [[1,1,1],[1,0,0]], // L
+        [[1,1,1],[0,0,1]], // J
+        [[1,1],[1,1]], // O
+        [[1,1,0],[0,1,1]], // Z
+        [[0,1,1],[1,1,0]]  // S
+    ];
+
+    const COLORS = ["cyan", "magenta", "orange", "blue", "yellow", "red", "green"];
+
+    let grid = Array.from({ length: ROW }, () => Array(COL).fill(0));
+
+    let currentMino = null;
+    let currentColorIndex = 0;
+    let currentX = 0;
+    let currentY = 0;
+
+    let score = 0;
+    let isGameOver = false;
+    let isPaused = false;
+    let dropCounter = 0;
+    let dropInterval = 1000;
+    let lastTime = 0;
+
+    function spawnMino() {
+        const index = Math.floor(Math.random() * SHAPES.length);
+        currentMino = SHAPES[index];
+        currentColorIndex = index + 1;
+
+        currentX = Math.floor((COL - currentMino[0].length) / 2);
+        currentY = 0;
+
+        if (checkCollision(currentX, currentY, currentMino)) {
+            isGameOver = true;
+            document.getElementById("game-over-text").style.display = "block";
+        }
+    }
+
+    function checkCollision(nextX, nextY, mino) {
+        for (let r = 0; r < mino.length; r++) {
+            for (let c = 0; c < mino[r].length; c++) {
+                if (mino[r][c]) {
+                    let targetX = nextX + c;
+                    let targetY = nextY + r;
+
+                    if (targetX < 0 || targetX >= COL || targetY >= ROW) {
+                        return true;
+                    }
+                    if (targetY >= 0 && grid[targetY][targetX]) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    function lockMino() {
+        for (let r = 0; r < currentMino.length; r++) {
+            for (let c = 0; c < currentMino[r].length; c++) {
+                if (currentMino[r][c]) {
+                    grid[currentY + r][currentX + c] = currentColorIndex;
+                }
+            }
+        }
+    }
+
+    function clearLines() {
+        let linesCleared = 0;
+        for (let r = ROW - 1; r >= 0; r--) {
+            if (grid[r].every(value => value > 0)) {
+                grid.splice(r, 1);
+                grid.unshift(Array(COL).fill(0));
+                linesCleared++;
+                r++;
+            }
+        }
+        if (linesCleared > 0) {
+            score += [0, 100, 300, 500, 800][linesCleared];
+            document.getElementById("score").innerText = score;
+        }
+    }
+
+    function rotate() {
+        const rotated = [];
+        for (let c = 0; c < currentMino[0].length; c++) {
+            const newRow = [];
+            for (let r = currentMino.length - 1; r >= 0; r--) {
+                newRow.push(currentMino[r][c]);
+            }
+            rotated.push(newRow);
+        }
+        if (!checkCollision(currentX, currentY, rotated)) {
+            currentMino = rotated;
+        }
+    }
+
+    function move(dx, dy) {
+        if (!checkCollision(currentX + dx, currentY + dy, currentMino)) {
+            currentX += dx;
+            currentY += dy;
+            return true;
+        }
+        return false;
+    }
+
+    function hardDrop() {
+        while (move(0, 1)) {}
+        handleLanded();
+    }
+
+    function handleLanded() {
+        lockMino();
+        clearLines();
+        spawnMino();
+    }
+
+    function togglePause() {
+        if (isGameOver) return;
+        isPaused = !isPaused;
+        if (isPaused) {
+            pauseOverlay.style.display = "block";
+        } else {
+            pauseOverlay.style.display = "none";
+            lastTime = performance.now();
+            requestAnimationFrame(update);
+        }
+    }
+
+    document.addEventListener("keydown", event => {
+        if (event.key === "p" || event.key === "P" || event.key === "Escape") {
+            togglePause();
+            return;
+        }
+
+        if (isGameOver || isPaused) return;
+
+        if (event.key === "ArrowLeft")  move(-1, 0);
+        if (event.key === "ArrowRight") move(1, 0);
+        if (event.key === "ArrowDown") {
+            if (move(0, 1)) dropCounter = 0;
+        }
+        if (event.key === "ArrowUp")    rotate();
+        if (event.key === " ")          hardDrop();
+    });
+
+    // ブロック本体を描画する関数
+    function drawBlock(x, y, colorIndex) {
+        ctx.fillStyle = COLORS[colorIndex - 1];
+        ctx.fillRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+        ctx.strokeStyle = "#111"; // ブロック自体の輪郭
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+    }
+
+    // 【新規追加】背景のグリッド線を描画する関数
+    function drawBackgroundGrid() {
+        ctx.strokeStyle = "#222"; // 目立ちすぎない薄いグレー
+        ctx.lineWidth = 1;
+
+        for (let r = 0; r < ROW; r++) {
+            for (let c = 0; c < COL; c++) {
+                ctx.strokeRect(c * BLOCK_SIZE, r * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+            }
+        }
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 1. 最背面にグリッド線を引く
+        drawBackgroundGrid();
+
+        // 2. 固定されたブロックの描画
+        for (let r = 0; r < ROW; r++) {
+            for (let c = 0; c < COL; c++) {
+                if (grid[r][c]) {
+                    drawBlock(c, r, grid[r][c]);
+                }
+            }
+        }
+
+        // 3. 現在操作中のミノの描画
+        for (let r = 0; r < currentMino.length; r++) {
+            for (let c = 0; c < currentMino[r].length; c++) {
+                if (currentMino[r][c]) {
+                    drawBlock(currentX + c, currentY + r, currentColorIndex);
+                }
+            }
+        }
+    }
+
+    function update(time = 0) {
+        if (isGameOver || isPaused) return;
+
+        const deltaTime = time - lastTime;
+        lastTime = time;
+
+        dropCounter += deltaTime;
+        if (dropCounter > dropInterval) {
+            if (!move(0, 1)) {
+                handleLanded();
+            }
+            dropCounter = 0;
+        }
+
+        draw();
+        requestAnimationFrame(update);
+    }
+
+    spawnMino();
+    update();
+</script>
+
+</body>
+</html>
